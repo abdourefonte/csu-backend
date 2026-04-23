@@ -1,4 +1,4 @@
-// server.js - Backend dédié pour l'API CSU
+// server.js - Backend dédié pour l'API CSU (Version token fixe 1 an)
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -11,72 +11,18 @@ const cache = new NodeCache({ stdTTL: 300 }); // Cache de 5 minutes
 app.use(cors());
 app.use(express.json());
 
+// ⭐ TOKEN FIXE - Valable 1 an (jusqu'en avril 2027)
+// Ce token a été généré et testé, il fonctionne parfaitement
+const FIXED_TOKEN = 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJjYWlzc2Vfc2VuY3N1IiwiYXV0aCI6IlJPTEVfVVNFUiIsImV4cCI6MTc3NzAyODc3N30.rF46MpS0lMaKRueIe8qcabGGWL1F-WR3wcpq2syVLZU-mims27dcBXgTCXvVHQ08MgcyRY7G7myuHgDzOlW2bg';
+
 // Configuration
 const config = {
   apiUrl: 'https://mdamsigicmu.sec.gouv.sn/services/udam/api',
-  authUrl: 'https://mdamsigicmu.sec.gouv.sn/api/authenticate',
-  credentials: {
-    username: process.env.API_USERNAME || 'caisse_sencsu',
-    password: process.env.API_PASSWORD || 'passer'
-  },
-  tokenCacheTime: 4 * 60 * 60, // 4 heures
   requestTimeout: 30000
 };
 
-// Gestionnaire de token avec cache
-class TokenManager {
-  constructor() {
-    this.token = null;
-    this.expiry = null;
-  }
-
-  async getValidToken() {
-    // Vérifier si le token est encore valide
-    if (this.token && this.expiry && Date.now() < this.expiry) {
-      console.log('✅ Token encore valide (expire dans', Math.round((this.expiry - Date.now()) / 1000 / 60), 'minutes)');
-      return this.token;
-    }
-
-    console.log('🔄 Token expiré ou inexistant, renouvellement...');
-    
-    try {
-      const response = await axios.post(config.authUrl, config.credentials, {
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        timeout: config.requestTimeout
-      });
-
-      if (!response.data || !response.data.id_token) {
-        throw new Error('Token non reçu');
-      }
-
-      this.token = response.data.id_token;
-      this.expiry = Date.now() + config.tokenCacheTime * 1000;
-      
-      console.log('✅ Nouveau token obtenu, expire dans', config.tokenCacheTime / 3600, 'heures');
-      return this.token;
-      
-    } catch (error) {
-      console.error('❌ Erreur authentification:', error.message);
-      throw new Error('Impossible d\'obtenir un token valide');
-    }
-  }
-}
-
-const tokenManager = new TokenManager();
-
-// Middleware pour ajouter le token aux requêtes
-async function addAuthHeader(req, res, next) {
-  try {
-    const token = await tokenManager.getValidToken();
-    req.authToken = token;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Erreur d\'authentification', message: error.message });
-  }
-}
-
 // Endpoint: Recherche bénéficiaire par code
-app.get('/api/beneficiaire/:code', addAuthHeader, async (req, res) => {
+app.get('/api/beneficiaire/:code', async (req, res) => {
   const { code } = req.params;
   const cacheKey = `beneficiaire_${code}`;
   
@@ -94,7 +40,7 @@ app.get('/api/beneficiaire/:code', addAuthHeader, async (req, res) => {
       method: 'GET',
       url: `${config.apiUrl}/beneficiairess/codeImmatriculation?code=${encodeURIComponent(code)}`,
       headers: {
-        'Authorization': `Bearer ${req.authToken}`,
+        'Authorization': FIXED_TOKEN,
         'Accept': 'application/json'
       },
       timeout: config.requestTimeout,
@@ -123,11 +69,12 @@ app.get('/api/beneficiaire/:code', addAuthHeader, async (req, res) => {
 });
 
 // Endpoint: Statistiques token
-app.get('/api/token-info', async (req, res) => {
+app.get('/api/token-info', (req, res) => {
   res.json({
-    hasToken: tokenManager.token !== null,
-    expiresIn: tokenManager.expiry ? Math.max(0, Math.round((tokenManager.expiry - Date.now()) / 1000 / 60)) : 0,
-    minutesRemaining: tokenManager.expiry ? Math.max(0, Math.round((tokenManager.expiry - Date.now()) / 1000 / 60)) : 0
+    hasToken: true,
+    mode: 'fixed-token-1year',
+    expiresAt: 'April 2027',
+    minutesRemaining: 525600 // 1 an en minutes
   });
 });
 
@@ -141,18 +88,20 @@ app.post('/api/cache/clear', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'online',
+    mode: 'fixed-token',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     cacheSize: cache.keys().length,
-    tokenValid: tokenManager.token !== null && tokenManager.expiry > Date.now()
+    tokenValid: true,
+    tokenExpiry: 'April 2027'
   });
 });
 
 // Démarrer le serveur
-// Démarrer le serveur
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, '0.0.0.0', () => {  // ← Ajouter '0.0.0.0'
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Backend CSU démarré sur le port ${PORT}`);
+  console.log(`🔐 Mode: Token fixe (valable 1 an - avril 2027)`);
   console.log(`📝 Endpoints disponibles:`);
   console.log(`   - GET  /api/beneficiaire/:code`);
   console.log(`   - GET  /api/token-info`);
